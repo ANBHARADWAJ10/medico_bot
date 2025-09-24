@@ -36,6 +36,11 @@ def download_nltk_data():
         nltk.download('punkt')
 
     try:
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt_tab')
+
+    try:
         nltk.data.find('corpora/stopwords')
     except LookupError:
         nltk.download('stopwords')
@@ -60,12 +65,10 @@ class MedicalChatBot:
     def __init__(self):
         # In-memory storage for testing
         self.patients_data = {}
-        self.available_slots = [
-            "Today 10:00 AM", "Today 2:00 PM", "Today 4:00 PM",
-            "Tomorrow 9:00 AM", "Tomorrow 11:00 AM", "Tomorrow 3:00 PM",
-            "Day After Tomorrow 10:00 AM", "Day After Tomorrow 1:00 PM"
-        ]
-        self.booked_slots = []
+
+        # Initialize available slots by date
+        self.available_slots_by_date = self.initialize_slots()
+        self.booked_slots = {}  # Will store {date: [booked_slots]}
 
         # Blood groups
         self.blood_groups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
@@ -101,6 +104,70 @@ class MedicalChatBot:
         # User states
         self.user_states = {}
 
+    def initialize_slots(self):
+        """Initialize available slots for the next 7 days"""
+        slots_by_date = {}
+        today = datetime.now()
+
+        for i in range(7):  # Next 7 days
+            date = today + timedelta(days=i)
+            date_str = date.strftime("%Y-%m-%d")
+            day_name = date.strftime("%A")
+
+            # Different slots for different days
+            if date.weekday() < 5:  # Monday to Friday
+                slots = [
+                    "09:00 AM", "10:00 AM", "11:00 AM",
+                    "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM"
+                ]
+            else:  # Weekend
+                slots = [
+                    "10:00 AM", "11:00 AM", "12:00 PM",
+                    "02:00 PM", "03:00 PM", "04:00 PM"
+                ]
+
+            slots_by_date[date_str] = {
+                'day_name': day_name,
+                'display_name': f"{day_name}, {date.strftime('%B %d, %Y')}",
+                'slots': slots
+            }
+
+        return slots_by_date
+
+    def get_available_dates(self):
+        """Get list of available dates"""
+        available_dates = []
+        for date_str, date_info in self.available_slots_by_date.items():
+            # Check if there are any available slots for this date
+            booked_for_date = self.booked_slots.get(date_str, [])
+            available_slots = [slot for slot in date_info['slots'] if slot not in booked_for_date]
+
+            if available_slots:  # Only include dates with available slots
+                available_dates.append({
+                    'date': date_str,
+                    'display_name': date_info['display_name'],
+                    'available_count': len(available_slots)
+                })
+
+        return available_dates
+
+    def get_available_slots_for_date(self, date_str):
+        """Get available slots for a specific date"""
+        if date_str not in self.available_slots_by_date:
+            return []
+
+        all_slots = self.available_slots_by_date[date_str]['slots']
+        booked_for_date = self.booked_slots.get(date_str, [])
+
+        return [slot for slot in all_slots if slot not in booked_for_date]
+
+    def book_slot(self, date_str, slot):
+        """Book a slot for a specific date"""
+        if date_str not in self.booked_slots:
+            self.booked_slots[date_str] = []
+
+        self.booked_slots[date_str].append(slot)
+
     def generate_unique_code(self):
         """Generate 8-digit unique code"""
         return ''.join(random.choices(string.digits, k=8))
@@ -110,15 +177,24 @@ class MedicalChatBot:
         # Convert to lowercase
         text = text.lower()
 
-        # Tokenize
-        tokens = word_tokenize(text)
+        # Tokenize using updated NLTK
+        try:
+            tokens = word_tokenize(text)
+        except Exception as e:
+            logger.warning(f"Tokenization error: {e}")
+            # Fallback to simple split
+            tokens = text.split()
 
         # Remove stopwords and lemmatize
         processed_tokens = []
         for token in tokens:
             if token not in self.stop_words and token.isalpha():
-                lemmatized = self.lemmatizer.lemmatize(token)
-                processed_tokens.append(lemmatized)
+                try:
+                    lemmatized = self.lemmatizer.lemmatize(token)
+                    processed_tokens.append(lemmatized)
+                except Exception as e:
+                    logger.warning(f"Lemmatization error: {e}")
+                    processed_tokens.append(token)
 
         return processed_tokens
 
@@ -205,7 +281,8 @@ class MedicalChatBot:
 
         # Appointment Details
         story.append(Paragraph("<b>Appointment Details:</b>", styles['Heading2']))
-        story.append(Paragraph(f"<b>Slot:</b> {patient_data['selected_slot']}", patient_info_style))
+        story.append(Paragraph(f"<b>Date:</b> {patient_data['selected_date_display']}", patient_info_style))
+        story.append(Paragraph(f"<b>Time:</b> {patient_data['selected_slot']}", patient_info_style))
         story.append(Paragraph(f"<b>Unique Code:</b> {unique_code}", patient_info_style))
         story.append(Spacer(1, 20))
 
@@ -222,7 +299,7 @@ class MedicalChatBot:
 bot = MedicalChatBot()
 
 
-# Bot handlers -- Updated with inline keyboard
+# Bot handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command handler with inline keyboard"""
     user_id = update.effective_user.id
@@ -325,12 +402,12 @@ async def handle_code_verification(update: Update, context: ContextTypes.DEFAULT
         details_text += f"⚧ **Gender:** {patient_data['gender']}\n"
         details_text += f"📞 **Contact:** {patient_data['contact']}\n\n"
         details_text += f"🩺 **Symptoms:** {', '.join(patient_data['symptoms'])}\n\n"
-        details_text += f"📅 **Appointed Slot:** {patient_data['selected_slot']}\n"
+        details_text += f"📅 **Appointment Date:** {patient_data['selected_date_display']}\n"
+        details_text += f"🕐 **Time Slot:** {patient_data['selected_slot']}\n"
         details_text += f"🔑 **Unique Code:** {code}\n\n"
         details_text += f"🧪 **Expected Diseases:** {', '.join(patient_data['possible_diseases']) if patient_data['possible_diseases'] else 'Consult doctor'}"
 
         keyboard = [
-            # [InlineKeyboardButton("📋 Download Prescription", callback_data="download_prescription")],
             [InlineKeyboardButton("🏠 Back to Menu", callback_data="back_to_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -473,8 +550,8 @@ async def handle_more_symptoms(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
-async def analyze_and_show_slots(update, context, user_id):
-    """Analyze symptoms and show available slots"""
+async def analyze_and_show_dates(update, context, user_id):
+    """Analyze symptoms and show available dates"""
     patient_data = bot.user_states[user_id]['patient_data']
 
     # Analyze symptoms
@@ -486,37 +563,83 @@ async def analyze_and_show_slots(update, context, user_id):
     analysis_text = "🧪 **Pre-Analysis Results:**\n\n"
     analysis_text += f"📝 **Your Symptoms:** {', '.join(patient_data['symptoms'])}\n\n"
     analysis_text += f"🔍 **Processed Symptoms:** {', '.join(matched_symptoms) if matched_symptoms else 'General symptoms detected'}\n\n"
-    # analysis_text += f"🩺 **Expected Diseases:** {', '.join(possible_diseases) if possible_diseases else 'Please consult doctor for proper diagnosis'}\n\n"
 
-    # Show available slots
-    if bot.available_slots:
-        analysis_text += "📅 **Available Appointment Slots:**\n"
+    # Show available dates
+    available_dates = bot.get_available_dates()
 
-        slot_keyboard = []
-        for i, slot in enumerate(bot.available_slots):
-            slot_keyboard.append([InlineKeyboardButton(f"📅 {slot}", callback_data=f"select_slot_{i}")])
+    if available_dates:
+        analysis_text += "📅 **Available Appointment Dates:**\n"
 
-        reply_markup = InlineKeyboardMarkup(slot_keyboard)
+        date_keyboard = []
+        for date_info in available_dates:
+            date_keyboard.append([
+                InlineKeyboardButton(
+                    f"📅 {date_info['display_name']} ({date_info['available_count']} slots)",
+                    callback_data=f"select_date_{date_info['date']}"
+                )
+            ])
+
+        reply_markup = InlineKeyboardMarkup(date_keyboard)
 
         # Handle both regular message and callback query
         if hasattr(update, 'message'):
             await update.message.reply_text(
-                analysis_text + "\nPlease select your preferred appointment slot:",
+                analysis_text + "\nPlease select your preferred appointment date:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
         else:
             await update.edit_message_text(
-                analysis_text + "\nPlease select your preferred appointment slot:",
+                analysis_text + "\nPlease select your preferred appointment date:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
     else:
-        message_text = analysis_text + "\n❌ Sorry, no slots are currently available. Please try again later."
+        message_text = analysis_text + "\n❌ Sorry, no appointment slots are currently available. Please try again later."
         if hasattr(update, 'message'):
             await update.message.reply_text(message_text, parse_mode='Markdown')
         else:
             await update.edit_message_text(message_text, parse_mode='Markdown')
+
+
+async def show_slots_for_date(query, context, user_id, selected_date):
+    """Show available slots for the selected date"""
+    available_slots = bot.get_available_slots_for_date(selected_date)
+
+    if not available_slots:
+        await query.edit_message_text(
+            "❌ Sorry, no slots are available for the selected date. Please choose another date."
+        )
+        return
+
+    # Store selected date
+    bot.user_states[user_id]['patient_data']['selected_date'] = selected_date
+    bot.user_states[user_id]['patient_data']['selected_date_display'] = bot.available_slots_by_date[selected_date][
+        'display_name']
+
+    # Create slots keyboard
+    slot_keyboard = []
+    for i, slot in enumerate(available_slots):
+        slot_keyboard.append([
+            InlineKeyboardButton(
+                f"🕐 {slot}",
+                callback_data=f"select_slot_{selected_date}_{i}"
+            )
+        ])
+
+    # Add back button
+    slot_keyboard.append([
+        InlineKeyboardButton("🔙 Back to Date Selection", callback_data="back_to_dates")
+    ])
+
+    reply_markup = InlineKeyboardMarkup(slot_keyboard)
+
+    date_display = bot.available_slots_by_date[selected_date]['display_name']
+    await query.edit_message_text(
+        f"🕐 **Available Time Slots for {date_display}:**\n\nPlease select your preferred time slot:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
 
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -557,90 +680,73 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 
         elif data == "no_more_symptoms":
             await query.edit_message_text("✅ Symptom collection completed. Analyzing...")
-            await analyze_and_show_slots(query, context, user_id)
+            await analyze_and_show_dates(query, context, user_id)
+
+        elif data.startswith("select_date_"):
+            selected_date = data.replace("select_date_", "")
+            await show_slots_for_date(query, context, user_id, selected_date)
+
+        elif data == "back_to_dates":
+            await analyze_and_show_dates(query, context, user_id)
 
         elif data.startswith("select_slot_"):
-            slot_index = int(data.replace("select_slot_", ""))
-            selected_slot = bot.available_slots[slot_index]
+            parts = data.replace("select_slot_", "").split("_")
+            selected_date = parts[0]
+            slot_index = int(parts[1])
+
+            available_slots = bot.get_available_slots_for_date(selected_date)
+            selected_slot = available_slots[slot_index]
+
             bot.user_states[user_id]['patient_data']['selected_slot'] = selected_slot
 
             confirm_keyboard = [
-                [InlineKeyboardButton("✅ Confirm Slot", callback_data=f"confirm_slot_{slot_index}")],
-                [InlineKeyboardButton("🔄 Reselect Slot", callback_data="reselect_slot")]
+                [InlineKeyboardButton("✅ Confirm Appointment",
+                                      callback_data=f"confirm_appointment_{selected_date}_{slot_index}")],
+                [InlineKeyboardButton("🔄 Select Different Slot", callback_data=f"select_date_{selected_date}")]
             ]
             reply_markup = InlineKeyboardMarkup(confirm_keyboard)
 
+            date_display = bot.available_slots_by_date[selected_date]['display_name']
             await query.edit_message_text(
-                f"📅 **Selected Slot:** {selected_slot}\n\n"
-                "Please confirm your selection:",
+                f"📅 **Selected Appointment:**\n\n"
+                f"**Date:** {date_display}\n"
+                f"**Time:** {selected_slot}\n\n"
+                "Please confirm your appointment:",
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
 
-        elif data.startswith("confirm_slot_"):
-            slot_index = int(data.replace("confirm_slot_", ""))
-            selected_slot = bot.available_slots[slot_index]
+        elif data.startswith("confirm_appointment_"):
+            parts = data.replace("confirm_appointment_", "").split("_")
+            selected_date = parts[0]
+            slot_index = int(parts[1])
 
-            # Move slot from available to booked
-            bot.available_slots.remove(selected_slot)
-            bot.booked_slots.append(selected_slot)
+            available_slots = bot.get_available_slots_for_date(selected_date)
+            selected_slot = available_slots[slot_index]
+
+            # Book the slot
+            bot.book_slot(selected_date, selected_slot)
 
             # Generate unique code and save patient data
             unique_code = bot.generate_unique_code()
             bot.patients_data[unique_code] = bot.user_states[user_id]['patient_data'].copy()
 
-            # Create copy button for the code
-            # menu_keyboard = [
-            #             #     [InlineKeyboardButton("📋 Copy Code",callback_data=f"copy_code_{unique_code}")],
-            #             #     [InlineKeyboardButton("📄 Download Prescription", callback_data="download_prescription")],
-            #             #     [InlineKeyboardButton("🏠 Back to Menu", callback_data="back_to_menu")]
-            #             # ]
-            #             # reply_markup = InlineKeyboardMarkup(menu_keyboard)
-
+            date_display = bot.available_slots_by_date[selected_date]['display_name']
             success_message = f"✅ **Appointment Booked Successfully!**\n\n"
-            success_message += f"📅 **Slot:** {selected_slot}\n"
+            success_message += f"📅 **Date:** {date_display}\n"
+            success_message += f"🕐 **Time:** {selected_slot}\n"
             success_message += f"🔑 **Your Unique Code:** `{unique_code}`\n\n"
-            success_message += "NOTE: Click on the unique code to copy the CODE! \n\n"
-            success_message += "⚠️ **Important:** Do not forget your 8-digit unique code as it is important for your verification!\n\n"
-            success_message += "You can now download your Pre-Analysis prescription."
-
-
+            success_message += "NOTE: Click on the unique code to copy it!\n\n"
+            success_message += "⚠️ **Important:** Save your 8-digit unique code - you'll need it to check your appointment details!\n\n"
+            success_message += "You can use this code to view your appointment details and pre-analysis results."
 
             await query.edit_message_text(
                 success_message,
-                # reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
 
             # Reset user state
             bot.user_states[user_id] = {'state': 'main_menu'}
-
-        elif data == "reselect_slot":
-            # Show available slots again
-            if bot.available_slots:
-                slot_keyboard = []
-                for i, slot in enumerate(bot.available_slots):
-                    slot_keyboard.append([InlineKeyboardButton(f"📅 {slot}", callback_data=f"select_slot_{i}")])
-
-                reply_markup = InlineKeyboardMarkup(slot_keyboard)
-                await query.edit_message_text(
-                    "📅 **Available Appointment Slots:**\n\nPlease select your preferred appointment slot:",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-
-        # # elif data.startswith("copy_code_"):
-        # #     unique_code = data.replace("copy_code_", "")
-        # #     await query.answer(f"Code copied: {unique_code}", show_alert=True)
-        #
-        # elif query.data == "copy_code_":
-        #     unique_code = data.replace("copy_code_", "")
-        #     await query.message.reply_text(f"✅ Code copied: <code>{unique_code}</code>", parse_mode="HTML")
-
-        # elif data == "download_prescription":
-        #     bot.user_states[user_id]['state'] = 'waiting_download_code'
-        #     await query.edit_message_text("🔑 Please enter your 8-digit unique code to download the prescription:")
-
 
         elif data == "back_to_menu":
             # Show main menu with inline keyboard
@@ -706,16 +812,15 @@ async def handle_download_code(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     """Run the bot"""
     # Replace with your actual bot token
-    # BOT_TOKEN = "8399702585:AAG0f6QqWPG3kBrenZA01KG6IcPDgqdLP14"
     BOT_TOKEN = "8399702585:AAG0f6QqWPG3kBrenZA01KG6IcPDgqdLP14"
-    # Create application with timezone configuration
+
+    # Create application
     from telegram.ext import ApplicationBuilder
     application = (
         ApplicationBuilder()
         .token(BOT_TOKEN)
         .build()
     )
-
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
@@ -730,16 +835,7 @@ def main():
 if __name__ == '__main__':
     main()
 
-# Requirements for this version:
-# pip install python-telegram-bot==20.7
-# pip install nltk==3.8.1
-# pip install reportlab==4.0.7
-# pip install pytz==2023.3
-
-# If you still get timezone errors, try:
-# pip install APScheduler==3.10.4
-
-# Alternative requirements (if above doesn't work):
-# pip install python-telegram-bot[job-queue]==20.7
-
-
+# Requirements for Python 3.13:
+# pip install python-telegram-bot==21.0.1
+# pip install nltk==3.9.1
+# pip install reportlab==4.2.2
