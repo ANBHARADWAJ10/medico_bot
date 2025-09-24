@@ -707,7 +707,7 @@ def main():
     """Run the bot"""
     # Replace with your actual bot token
     # BOT_TOKEN = "8399702585:AAG0f6QqWPG3kBrenZA01KG6IcPDgqdLP14"
-    BOT_TOKEN = ""
+    BOT_TOKEN = "8399702585:AAG0f6QqWPG3kBrenZA01KG6IcPDgqdLP14"
     # Create application with timezone configuration
     from telegram.ext import ApplicationBuilder
     application = (
@@ -741,4 +741,5 @@ if __name__ == '__main__':
 
 # Alternative requirements (if above doesn't work):
 # pip install python-telegram-bot[job-queue]==20.7
+
 
