@@ -1,1 +1,1 @@
-# Appoinment Booking Chat Bot
+# Appointment Booking Chat Bot
