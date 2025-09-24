@@ -1,0 +1,13 @@
+python-telegram-bot==20.7
+nltk==3.8.1
+reportlab==4.0.7
+pytz==2023.3
+
+# run this command before running the project:
+    # pip install -r requirements.txt
+
+
+# 85930954
+
+# pip install motor
+# pip install pymongo
