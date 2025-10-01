@@ -1509,7 +1509,7 @@ async def handle_download_code(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 def main():
-    """Run the bot with webhooks for Render deployment"""
+    """Run the bot"""
     # Create application
     from telegram.ext import ApplicationBuilder
 
@@ -1524,10 +1524,11 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_callback_query))
 
-    # Test MongoDB connection and show available dates
+    # Run the bot
     print("🤖 Medical Chatbot is starting...")
     print("📅 Fetching upcoming appointment dates from MongoDB...")
 
+    # Test MongoDB connection and show available dates
     try:
         upcoming_dates = bot.get_next_7_upcoming_dates()
         print(f"✅ Found {len(upcoming_dates)} upcoming dates with available slots")
@@ -1543,25 +1544,8 @@ def main():
     except Exception as e:
         print(f"❌ Error fetching data: {e}")
 
-    # Webhook configuration for Render
-    PORT = int(os.environ.get('PORT', 10000))
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-    # Get the app URL from environment or construct it
-    # Method 1: Use Render's automatic URL (recommended)
-    RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
-
-    WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
-
-    print(f"🌐 Starting webhook server on port: {PORT}")
-    print(f"🔗 Webhook URL: {WEBHOOK_URL}")
-
-    # Run with webhooks (this handles everything automatically)
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=BOT_TOKEN,
-        webhook_url=WEBHOOK_URL
-    )
 
 if __name__ == '__main__':
     main()
