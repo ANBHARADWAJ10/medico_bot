@@ -1,1 +1,1 @@
-python-3.12.3
+worker: python no_db_bot_02.py
