@@ -1,8 +1,10 @@
 python-telegram-bot==20.7
+python-telegram-bot==21.9
 pymongo==4.6.1
 python-dotenv==1.0.0
 nltk==3.8.1
 reportlab==4.0.7
+gunicorn==21.2.0
 
 # pymongo
 
