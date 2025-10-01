@@ -3,7 +3,6 @@ pymongo==4.6.1
 python-dotenv==1.0.0
 nltk==3.8.1
 reportlab==4.0.7
-gunicorn==21.2.0
 
 # pymongo
 
@@ -25,5 +24,6 @@ gunicorn==21.2.0
 
 # analyze_and_show_dates - 1st search
 # get_available_dates - 2nd search
+
 
 # 241 time slot v - key --< has been changed
